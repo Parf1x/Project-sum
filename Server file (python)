@@ -1,0 +1,175 @@
+from flask import Flask, jsonify, request
+from werkzeug.security import generate_password_hash, check_password_hash
+import json
+
+app = Flask(__name__)
+
+# Имитация базы данных
+users = [
+    {"login": "admin", "password": generate_password_hash("admin123"), "role": 1}
+]
+projects = []
+
+# Считывание данных из файлов (если они есть)
+def load_data():
+    global users, projects
+    try:
+        with open("users.json", "r", encoding="utf-8") as f:  # Указание кодировки utf-8 при чтении
+            users = json.load(f)
+    except FileNotFoundError:
+        pass
+
+    try:
+        with open("projects.json", "r", encoding="utf-8") as f:  # Указание кодировки utf-8 при чтении
+            projects = json.load(f)
+    except FileNotFoundError:
+        pass
+
+# Сохранение данных в файлы
+def save_data():
+    with open("users.json", "w", encoding="utf-8") as f:  # Указание кодировки utf-8 при записи
+        json.dump(users, f, ensure_ascii=False, indent=4)
+
+    with open("projects.json", "w", encoding="utf-8") as f:  # Указание кодировки utf-8 при записи
+        json.dump(projects, f, ensure_ascii=False, indent=4)
+
+
+# Авторизация
+@app.route('/login', methods=['POST'])
+def login():
+    data = request.json
+    login = data.get('login')
+    password = data.get('password')
+
+    for user in users:
+        if user['login'] == login and check_password_hash(user['password'], password):
+            return jsonify({"message": "Авторизация успешна", "role": user['role']}), 200
+    return jsonify({"message": "Неверный логин или пароль"}), 401
+
+# Получить всех пользователей
+@app.route('/users', methods=['GET'])
+def get_users():
+    return jsonify(users)
+
+# Добавить пользователя
+@app.route('/users', methods=['POST'])
+def add_user():
+    data = request.json
+    login = data.get('login')
+    password = data.get('password')
+    role = data.get('role')
+
+    # Проверка, что логин уникален
+    for user in users:
+        if user['login'] == login:
+            return jsonify({"message": "Пользователь с таким логином уже существует"}), 400
+
+    hashed_password = generate_password_hash(password)
+    users.append({"login": login, "password": hashed_password, "role": role})
+    save_data()
+    return jsonify({"message": "Пользователь добавлен"}), 200
+
+# Обновить пользователя
+@app.route('/users/<login>', methods=['PUT'])
+def update_user(login):
+    data = request.json
+    password = data.get('password')
+    role = data.get('role')
+    new_login = data.get('login')  # Новый логин
+
+    # Проверка уникальности нового логина
+    if new_login:
+        for user in users:
+            if user['login'] == new_login:
+                return jsonify({"message": "Логин уже используется"}), 400  # Ошибка, если логин уже занят
+
+    for user in users:
+        if user['login'] == login:
+            if new_login:
+                user['login'] = new_login  # Обновляем логин
+            if password:
+                user['password'] = generate_password_hash(password)  # Обновляем пароль
+            if role is not None:
+                user['role'] = role  # Обновляем роль
+
+            save_data()
+            return jsonify({"message": "Пользователь обновлен"}), 200
+
+    return jsonify({"message": "Пользователь не найден"}), 404
+
+# Редактировать проект
+@app.route('/projects/<project_name>', methods=['PUT'])
+def edit_project(project_name):
+    data = request.json
+
+    # Ищем проект по названию
+    project = next((proj for proj in projects if proj["project_name"].lower() == project_name.lower()), None)
+
+    if not project:
+        return jsonify({"message": "Проект не найден"}), 404
+
+    # Обновляем данные проекта
+    project["project_name"] = data.get("project_name", project["project_name"])
+    project["work_type"] = data.get("work_type", project["work_type"])
+    project["employee_name"] = data.get("employee_name", project["employee_name"])
+    project["estimated_hours"] = data.get("estimated_hours", project["estimated_hours"])
+    project["hourly_rate"] = data.get("hourly_rate", project["hourly_rate"])
+
+    # Сохраняем обновленные данные
+    save_data()
+
+    return jsonify({"message": "Проект успешно обновлен"}), 200
+
+# Получить все проекты
+@app.route('/projects', methods=['GET'])
+def get_projects():
+    return jsonify(projects)
+
+# Добавить проект
+@app.route('/projects', methods=['POST'])
+def add_project():
+    data = request.json
+
+    # Данные проекта
+    project_name = data.get("project_name")
+    work_type = data.get("work_type")
+    employee_name = data.get("employee_name")
+    estimated_hours = data.get("estimated_hours")
+    hourly_rate = data.get("hourly_rate")
+
+    # Проверка, что все поля заполнены
+    if not project_name or not work_type or not employee_name or not estimated_hours or not hourly_rate:
+        return jsonify({"message": "Все поля обязательны для заполнения"}), 400
+
+    # Формируем новый проект
+    new_project = {
+        "project_name": project_name,
+        "hourly_rate": hourly_rate,
+        "work_type": work_type,
+        "employee_name": employee_name,
+        "estimated_hours": estimated_hours,
+
+    }
+    # Добавляем проект в базу данных (список projects)
+    projects.append(new_project)
+    save_data()
+
+    return jsonify({"message": "Проект успешно добавлен"}), 201
+# Удалить проект
+@app.route('/projects/<project_name>', methods=['DELETE'])
+def delete_project(project_name):
+    global projects
+    projects = [project for project in projects if project['project_name'] != project_name]
+    save_data()
+    return jsonify({"message": "Проект удален"}), 200
+# Удалить пользователя
+@app.route('/users/<login>', methods=['DELETE'])
+def delete_user(login):
+    global users
+    users = [user for user in users if user['login'] != login]
+    save_data()
+    return jsonify({"message": "Пользователь удален"}), 200
+# Запуск сервера
+if __name__ == '__main__':
+    load_data()  # Загрузить данные при старте
+    app.run(debug=True)
